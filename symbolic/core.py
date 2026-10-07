@@ -196,7 +196,7 @@ def _make_sum(terms):
         else:
             if skeleton not in coefficients:
                 order.append(skeleton)
-            coefficients[skeleton] = coefficient
+            coefficients[skeleton] = coefficients.get(skeleton, 0) + coefficient
     parts = [("num", total)] if total else []
     parts.extend(_scaled(skeleton, coefficients[skeleton])
                  for skeleton in order if coefficients[skeleton])
@@ -225,7 +225,7 @@ def _scaled(skeleton, coefficient):
 def _term_key(term):
     """加项的排序键：次数高的在前，同次数按文本升序。"""
     text = to_text(term)
-    return (_degree(term), text[1:] if text.startswith("-") else text)
+    return (-_degree(term), text[1:] if text.startswith("-") else text)
 
 
 def _degree(node):
@@ -241,8 +241,11 @@ def _degree(node):
 def _make_product(factors):
     """积的规范形式：摊平、乘开括号、折叠整系数、合并同底数幂。"""
     flat = _flatten("mul", factors)
-    if flat[0][0] == "add":
-        return _distribute(flat, 0)
+    if any(factor[0] == "num" and factor[1] == 0 for factor in flat):
+        return ("num", 0)
+    for index, factor in enumerate(flat):
+        if factor[0] == "add":
+            return _distribute(flat, index)
     coefficient = 1
     units = []
     for factor in flat:
@@ -253,7 +256,7 @@ def _make_product(factors):
     if not units:
         return ("num", coefficient)
     units = _combine_runs(units)
-    if coefficient in (0, 1):
+    if coefficient == 1:
         return _packed("mul", units)
     return ("mul", (("num", coefficient),) + tuple(units))
 
@@ -307,12 +310,16 @@ def _combine_run(run):
 
 def _power_parts(factor):
     """某一段里一个因子的底数与指数。"""
+    if factor[0] == "pow":
+        return factor[1], factor[2]
     return factor, 1
 
 
 def _movable(node):
     """能不能被重新排序：整系数是中心的，小写名字是标量，含非交换原子的一律留下。"""
-    if node[0] in ("num", "sym", "nc"):
+    if node[0] == "nc":
+        return False
+    if node[0] in ("num", "sym"):
         return True
     if node[0] == "pow":
         return _movable(node[1])
@@ -329,6 +336,10 @@ def _make_power(base, exponent):
         return ("num", base[1] ** exponent)
     if exponent == 0:
         return ("num", 1)
+    if exponent == 1:
+        return base
+    if base[0] == "pow":
+        return _make_power(base[1], base[2] * exponent)
     if base[0] == "mul" and _movable(base):
         return _make_product([_make_power(factor, exponent) for factor in base[1]])
     return ("pow", base, exponent)
